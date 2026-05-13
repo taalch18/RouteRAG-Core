@@ -1,250 +1,242 @@
-# Adaptive RAG Query Routing
+<div align="center">
 
-An intelligent Retrieval-Augmented Generation (RAG) system that dynamically selects the optimal retrieval strategy for a query before answer generation.
+# 🔀 Adaptive RAG Query Router
 
-Instead of treating every query the same way, the system analyzes the query’s characteristics and routes it through the most effective retrieval path:
+### A production-grade framework that routes queries to the optimal retrieval strategy — saving cost without sacrificing quality
 
-- Direct LLM generation
-- Dense vector retrieval
-- Sparse BM25 retrieval
-- Web search retrieval
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-1C1C1C?style=flat&logo=langchain&logoColor=white)](https://github.com/langchain-ai/langgraph)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
+[![Status: Active](https://img.shields.io/badge/Status-Active-brightgreen?style=flat)]()
+[![Eval: RAGAS](https://img.shields.io/badge/Eval-RAGAS-blueviolet?style=flat)](https://docs.ragas.io)
 
-The project focuses on improving:
-- Retrieval quality
-- Cost efficiency
-- Latency optimization
-- Faithfulness in RAG systems
-
-# Motivation
-
-Most production RAG systems assume that every query should use the same retrieval strategy.
-
-This creates major inefficiencies:
-
-| Query Type | Problem With Uniform Retrieval |
-|---|---|
-| "What is gradient descent?" | Dense retrieval is unnecessary |
-| "SIGKILL-5 on pod xyz-123" | Dense retrieval fails exact matching |
-| "Latest OpenAI pricing today" | Internal vector store becomes stale |
-
-This project introduces a lightweight routing layer that predicts the best retrieval modality based on query characteristics.
+**[Live Demo (coming soon)]** · **[Architecture](#architecture)** · **[Benchmarks](#benchmarks)** · **[Quickstart](#quickstart)**
 
 
-# Core Research Question
+*Every RAG system today sends every query through the same retrieval strategy. That's expensive and often wrong. This project fixes it.*
 
-Can a lightweight query classifier intelligently route queries between multiple retrieval modalities while reducing cost and preserving answer quality?
+</div>
 
+## The Problem
 
-# System Architecture
+Two queries hit the same RAG pipeline:
 
-```text
-User Query
-    │
-    ▼
-Query Router
-(Logistic Regression / BERT)
-    │
-    ├──► LLM Direct
-    ├──► Dense Retrieval
-    ├──► Sparse BM25
-    └──► Web Search
-            │
-            ▼
-      Context Fusion
-            │
-            ▼
-      GPT-4o Generator
-            │
-            ▼
-   Evaluation + Cost Tracking
+```
+"What is the attention mechanism in transformers?"
+"What caused SIGKILL-5 on pod sre-agent-abc-123 at 03:41 UTC?"
 ```
 
+A standard RAG system routes **both** through dense vector retrieval. This is wrong twice over:
 
-# Retrieval Paths
+- The first query is **parametrically answerable** — the LLM already knows this from training. Dense retrieval adds latency and cost with zero quality gain.
+- The second needs **exact token matching** — the pod ID `abc-123` is a lookup key, not a semantic concept. Dense retrieval finds plausible-sounding but wrong documents.
 
-## 1. LLM Direct
-Used when the model can answer directly from parametric memory.
+**This router fixes that.** It classifies the incoming query, selects the right retrieval strategy, and tracks exactly what that decision saved.
 
-Example:
-- "What is attention mechanism?"
 
-Benefits:
-- Lowest latency
-- Zero retrieval cost
+## How It Works
 
-## 2. Dense Vector Retrieval
+The router extracts three signals from every query:
 
-Uses:
-- Sentence Transformers
-- Pinecone
-- Cosine similarity
+| Signal | What It Detects | Routes To |
+|---|---|---|
+| **Parametric Answerability** | Can the LLM answer this from training weights alone? | LLM Direct (no retrieval) |
+| **Token Specificity** | Does it need exact match — error codes, IDs, dates? | Sparse BM25 |
+| **Information Source Type** | Is the answer external / real-time / post-cutoff? | Web Search |
+| *(default)* | Semantic / conceptual query | Dense Vector |
 
-Best for:
-- Semantic understanding
-- Conceptual similarity
+A lightweight logistic regression classifier (trained on 10 handcrafted features, <5ms inference on CPU) makes the routing decision. Every run is evaluated with RAGAS faithfulness and a formal cost model.
 
-Example:
-- "How does attention differ from RNNs?"
+## Architecture
 
-## 3. Sparse BM25 Retrieval
+```
+                   ┌──────────────────────────────────┐
+  User Query ────► │          Query Router             │
+                   │   LogisticRegression + spaCy      │
+                   │                                   │
+                   │  · Parametric Answerability       │
+                   │  · Token Specificity              │
+                   │  · Information Source Type        │
+                   └──────┬──────┬──────┬──────┬───────┘
+                          │      │      │      │
+                   ┌──────┘      │      │      └──────┐
+                   ▼             ▼      ▼             ▼
+            ┌──────────┐  ┌──────────┐ ┌──────────┐ ┌──────────┐
+            │  Direct  │  │  Dense   │ │  Sparse  │ │   Web    │
+            │ (no ret) │  │ Pinecone │ │  BM25    │ │  Search  │
+            │          │  │ MiniLM   │ │ rank_bm25│ │  Serper  │
+            └────┬─────┘  └────┬─────┘ └────┬─────┘ └────┬─────┘
+                 │             │             │             │
+                 │        ┌────┴─────────────┘             │
+                 │        │     RRF Fusion (k=60)          │
+                 │        └──────────┐                     │
+                 └───────────────────┼─────────────────────┘
+                                     ▼
+                            ┌────────────────┐
+                            │  LLM Generator │
+                            │    GPT-4o      │
+                            └───────┬────────┘
+                                    │
+                       ┌────────────┴───────────┐
+                       ▼                        ▼
+                  RAGAS Eval              Cost Tracker
+             Faithfulness · Precision   USD · tokens · ms
+```
 
-Uses:
-- rank-bm25
+## Stack
 
-Best for:
-- Exact token matching
-- Error logs
-- IDs
-- Dates
+| Layer | Technology | Why |
+|---|---|---|
+| Orchestration | **LangGraph** | Stateful routing graph with typed conditional edges |
+| Dense Retrieval | **Pinecone** + `all-MiniLM-L6-v2` | Managed vector store, local embeddings (zero API cost) |
+| Sparse Retrieval | **rank-bm25** (BM25Okapi) | Pure Python, zero infra, exact token match |
+| Web Search | **Serper API** | Generous free tier, Google Search results |
+| Router | **scikit-learn** LR + **spaCy** | Interpretable, sub-5ms inference, CPU-only |
+| Evaluation | **RAGAS** | Faithfulness + Context Precision without human labels |
+| Data Validation | **Pydantic v2** | Typed schemas at every system boundary |
+| Demo | **Streamlit** | Live cost and quality tracking per query |
+| Generation | **OpenAI GPT-4o** | Final answer conditioned on retrieved context |
 
-Example:
-- "SIGKILL-5 on pod abc-123"
+## Project Structure
 
-## 4. Web Search Retrieval
-
-Uses:
-- Serper API
-
-Best for:
-- Real-time external information
-
-Example:
-- "Latest Claude pricing today"
-
-# Routing Signals
-
-The router predicts the retrieval strategy using three signal groups:
-
-## Parametric Answerability
-Can the LLM answer without retrieval?
-
-## Token Specificity
-Does the query require exact token matching?
-
-## Information Source Type
-Where does the answer exist?
-- Internal corpus
-- Public internet
-- Parametric memory
-
-# Tech Stack
-
-| Component | Technology |
-|---|---|
-| Orchestration | LangGraph |
-| LLM | GPT-4o |
-| Dense Retrieval | Pinecone |
-| Embeddings | all-MiniLM-L6-v2 |
-| Sparse Retrieval | rank-bm25 |
-| Web Search | Serper API |
-| NLP | spaCy |
-| ML Router | scikit-learn |
-| Evaluation | RAGAS |
-| Validation | Pydantic |
-
-# Evaluation Metrics
-
-The system is benchmarked using:
-
-- Faithfulness
-- Context Precision
-- Answer Relevancy
-- Cost per query
-- Latency
-
-Baselines:
-- Always Dense
-- Always Sparse
-- Always Web
-- Random Router
-
-# Repository Structure
-
-```text
-adaptive-rag-routing/
-│
+```
+adaptive-rag-router/
+├── router/
+│   ├── classifier.py        # Query classifier (LR + BERT variants)
+│   ├── features.py          # Feature extraction — 10 routing signal features
+│   └── routing_signals.py   # Parametric / specificity / source detectors
+├── retrieval/
+│   ├── dense.py             # Pinecone dense retrieval
+│   ├── sparse.py            # BM25Okapi retrieval
+│   ├── web_search.py        # Serper API wrapper
+│   └── llm_direct.py        # Direct generation, no retrieval
+├── pipeline/
+│   ├── graph.py             # LangGraph state machine
+│   └── schemas.py           # Pydantic I/O models
+├── eval/
+│   ├── ragas_runner.py      # RAGAS evaluation harness
+│   ├── cost_tracker.py      # Token + API cost logging per query
+│   └── benchmark.py         # Full benchmark runner across strategies
+├── demo/
+│   └── app.py               # Streamlit demo with live cost tracking
 ├── data/
+│   ├── label_queries.py     # Oracle routing labeler
+│   └── datasets/            # NQ, HotpotQA, TriviaQA, synthetic SRE
 ├── notebooks/
-├── src/
-│   ├── router/
-│   ├── retrieval/
-│   ├── generation/
-│   ├── evaluation/
-│   ├── pipelines/
-│   └── utils/
-│
-├── experiments/
-├── tests/
+│   ├── 01_eda.ipynb
+│   ├── 02_classifier_training.ipynb
+│   └── 03_results_analysis.ipynb
+├── docker-compose.yml
+├── .env.example
 ├── requirements.txt
-├── README.md
-└── .env
+└── README.md
 ```
 
-# Setup
+## Quickstart
 
-## Clone Repository
+### Prerequisites
 
-```bash
-git clone https://github.com/yourusername/adaptive-rag-routing.git
-cd adaptive-rag-routing
-```
+- Python 3.10+
+- Pinecone account (free tier)
+- OpenAI API key
+- Serper API key (free tier: 2,500 queries/month)
 
-## Create Virtual Environment
-
-```bash
-python -m venv venv
-source venv/bin/activate
-```
-
-Windows:
+### Installation
 
 ```bash
-venv\Scripts\activate
-```
+git clone https://github.com/taalchawla/adaptive-rag-router.git
+cd adaptive-rag-router
 
-## Install Dependencies
-
-```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+python -m spacy download en_core_web_sm
 ```
 
-# Environment Variables
+### Environment Setup
 
-Create a `.env` file:
-
-```env
-OPENAI_API_KEY=your_key
-PINECONE_API_KEY=your_key
-SERPER_API_KEY=your_key
+```bash
+cp .env.example .env
+# Fill in:
+# OPENAI_API_KEY=sk-...
+# PINECONE_API_KEY=...
+# PINECONE_INDEX=adaptive-rag
+# SERPER_API_KEY=...
 ```
 
-# Future Work
+### Run a Query
 
-- Hybrid dense+sparse retrieval
-- Reinforcement-learning routers
-- Multi-hop retrieval
-- Adaptive chunking
-- Agentic retrieval planners
-- Confidence-aware fallback routing
+```python
+from pipeline.graph import build_graph
 
-# Research Positioning
+graph = build_graph()
 
-This project explores retrieval modality routing for cost-aware and quality-aware RAG systems.
+result = graph.invoke({
+    "query": "What caused SIGKILL-5 on pod sre-agent-abc-123 at 03:41 UTC?",
+    "route": None,
+    "retrieved_chunks": [],
+    "answer": "",
+    "cost_usd": 0.0,
+    "faithfulness": 0.0
+})
 
-Related areas:
-- Adaptive RAG
-- Self-RAG
-- Retrieval optimization
-- Agentic AI systems
-- Query planning systems
+print(f"Route:      {result['route']}")        # sparse
+print(f"Answer:     {result['answer']}")
+print(f"Cost (USD): ${result['cost_usd']:.4f}")
+print(f"Faith:      {result['faithfulness']:.2f}")
+```
 
-# License
+### Run the Demo
 
-MIT License
+```bash
+streamlit run demo/app.py
+```
+
+### Run Full Benchmark
+
+```bash
+python eval/benchmark.py \
+  --datasets nq hotpotqa trivia synthetic_sre \
+  --strategies all \
+  --output results/benchmark.csv
+```
+
+## Benchmarks
+
+> Results being populated as benchmark suite completes.
+
+| Strategy | Faithfulness↑ | Ctx Precision↑ | Cost / 1K queries↓ | Latency p50↓ |
+|---|---|---|---|---|
+| Always-Dense (baseline) | — | — | — | — |
+| Always-BM25 (baseline) | — | — | — | — |
+| Always-Web (baseline) | — | — | — | — |
+| Random Router | — | — | — | — |
+| **LR Router (ours)** | — | — | — | — |
+| **BERT Router (ours)** | — | — | — | — |
 
 
-# Author
+## Cost Model
 
-Taal Chawla
+```
+Total Cost = C_retrieval + C_generation
 
-Machine Learning Engineering • Retrieval Systems • Agentic AI
+C_retrieval:
+  Dense  → local MiniLM ($0) + Pinecone (~$0 free tier)
+  BM25   → local computation ≈ $0
+  Web    → $0.001 / query (Serper)
+  Direct → $0
+
+C_generation:
+  input_tokens  × $0.0000025  (GPT-4o)
+  output_tokens × $0.0000100  (GPT-4o)
+```
+
+## Author
+
+**Taal Chawla** — ECE (AI/ML), MAIT GGSIPU Delhi
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-taalchawla18-0A66C2?style=flat&logo=linkedin)](https://linkedin.com/in/taalchawla18)
+
+
+<div align="center">
+<sub>Built as a production AI engineering project. Star to follow progress.</sub>
+</div>
