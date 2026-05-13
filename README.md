@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🔀 Adaptive RAG Query Router
+# 🔀 RouteRAG-Core
 
-### A production-grade framework that routes queries to the optimal retrieval strategy — saving cost without sacrificing quality
+### Production-grade query routing for RAG pipelines — right strategy, every time
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-1C1C1C?style=flat&logo=langchain&logoColor=white)](https://github.com/langchain-ai/langgraph)
@@ -16,6 +16,7 @@
 *Every RAG system today sends every query through the same retrieval strategy. That's expensive and often wrong. This project fixes it.*
 
 </div>
+
 
 ## The Problem
 
@@ -46,6 +47,7 @@ The router extracts three signals from every query:
 | *(default)* | Semantic / conceptual query | Dense Vector |
 
 A lightweight logistic regression classifier (trained on 10 handcrafted features, <5ms inference on CPU) makes the routing decision. Every run is evaluated with RAGAS faithfulness and a formal cost model.
+
 
 ## Architecture
 
@@ -83,6 +85,7 @@ A lightweight logistic regression classifier (trained on 10 handcrafted features
              Faithfulness · Precision   USD · tokens · ms
 ```
 
+
 ## Stack
 
 | Layer | Technology | Why |
@@ -97,10 +100,11 @@ A lightweight logistic regression classifier (trained on 10 handcrafted features
 | Demo | **Streamlit** | Live cost and quality tracking per query |
 | Generation | **OpenAI GPT-4o** | Final answer conditioned on retrieved context |
 
+
 ## Project Structure
 
 ```
-adaptive-rag-router/
+RouteRAG-Core/
 ├── router/
 │   ├── classifier.py        # Query classifier (LR + BERT variants)
 │   ├── features.py          # Feature extraction — 10 routing signal features
@@ -132,6 +136,7 @@ adaptive-rag-router/
 └── README.md
 ```
 
+
 ## Quickstart
 
 ### Prerequisites
@@ -144,8 +149,8 @@ adaptive-rag-router/
 ### Installation
 
 ```bash
-git clone https://github.com/taalchawla/adaptive-rag-router.git
-cd adaptive-rag-router
+git clone https://github.com/taalchawla/RouteRAG-Core.git
+cd RouteRAG-Core
 
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -200,6 +205,7 @@ python eval/benchmark.py \
   --output results/benchmark.csv
 ```
 
+
 ## Benchmarks
 
 > Results being populated as benchmark suite completes.
@@ -230,6 +236,24 @@ C_generation:
   output_tokens × $0.0000100  (GPT-4o)
 ```
 
+
+## Roadmap
+
+- [x] Project architecture design
+- [x] Routing signal formalization (3 signals, 4 paths)
+- [x] README + requirements
+- [ ] `router/features.py` — feature extraction module
+- [ ] `router/classifier.py` — LR classifier + training pipeline
+- [ ] `pipeline/schemas.py` — Pydantic I/O models
+- [ ] `pipeline/graph.py` — LangGraph state machine
+- [ ] `retrieval/` — all four retrieval modules
+- [ ] `eval/` — RAGAS harness + cost tracker
+- [ ] Benchmark results
+- [ ] `demo/app.py` — Streamlit demo with live cost tracking
+- [ ] Docker Compose
+- [ ] BERT Router variant
+
+
 ## Author
 
 **Taal Chawla** — ECE (AI/ML), MAIT GGSIPU Delhi
@@ -238,5 +262,5 @@ C_generation:
 
 
 <div align="center">
-<sub>Built as a production AI engineering project. Star to follow progress.</sub>
+<sub>RouteRAG-Core — production AI engineering. Star to follow progress.</sub>
 </div>
